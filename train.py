@@ -8,7 +8,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, classification_report
+from sklearn.metrics import f1_score
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -21,20 +21,20 @@ def extract_features(directory):
             file_path = os.path.join(folder_path, file)
             audio, sample_rate = librosa.load(file_path, sr=None)
             mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
-            mfccs_processed = np.mean(mfccs.T, axis=0)
-            features.append(mfccs_processed)
+            features.append(mfccs.T)
             labels.append(class_label)
     return np.array(features), np.array(labels)
 
-def build_dnn_model(input_shape, num_classes):
+def build_dnn_model(input_shape):
     model = Sequential([
-        layers.LSTM(128, input_shape=input_shape, return_sequences=True),
+        tf.keras.Input(shape=input_shape),
+        layers.LSTM(128,return_sequences=True),
         layers.Dropout(0.5),
         layers.LSTM(64),
         layers.Dense(64, activation='relu'),
-        layers.Dense(num_classes, activation='softmax')
+        layers.Dense(1, activation='sigmoid')
     ])
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy', tf.keras.metrics.AUC(name='auc')])
     return model
 
 def main(train_dir, test_dir):
@@ -42,6 +42,7 @@ def main(train_dir, test_dir):
     data_features, data_labels = extract_features(train_dir)
     test_features, test_labels = extract_features(test_dir)
 
+    
     # Encode labels
     le = LabelEncoder()
     data_labels_encoded = le.fit_transform(data_labels)
@@ -50,30 +51,66 @@ def main(train_dir, test_dir):
     # Split data into training and validation sets
     train_features, val_features, train_labels, val_labels = train_test_split(
         data_features, data_labels_encoded, test_size=0.2, random_state=42)
-
     # Build the DNN model
-    model = build_dnn_model((train_features.shape[1], 1), len(le.classes_))
+    model = build_dnn_model((train_features.shape[1], train_features.shape[2]))
 
     # Setup callbacks
-    checkpoint = ModelCheckpoint('keras/best_model.keras', save_best_only=True, monitor='val_loss', mode='min')
+    checkpoint = ModelCheckpoint(f'keras/{train_dir}-3dshape.keras', save_best_only=True, monitor='val_loss', mode='min')
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min')
 
+    # Add class weight
+    # layers.BatchNormalization()
     # Train the model
     history = model.fit(
-        np.expand_dims(train_features, axis=-1), train_labels,
-        validation_data=(np.expand_dims(val_features, axis=-1), val_labels),
+        train_features, train_labels,
+        validation_data=(val_features, val_labels),
         epochs=100, batch_size=32, callbacks=[checkpoint, early_stopping])
 
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'])
+    plt.plot(history.history['val_accuracy'])
+    plt.title('Model Accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Val'], loc='upper left')
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Val'], loc='upper left')
+    plt.tight_layout()
+    plt.savefig(f'images/{train_dir}_plot.png')
+    plt.close()
+
+
     # Evaluate the model
-    test_loss, test_accuracy = model.evaluate(np.expand_dims(test_features, axis=-1), test_labels_encoded)
+    test_loss, test_accuracy, test_auc = model.evaluate(test_features, test_labels_encoded)
     print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
-    print(f"Test Loss: {test_loss:.2f}")
+    print(f"Test Loss: {test_loss * 100:.2f}%")
+    print(f"Test AUC: {test_auc:.2f}")
 
     # Predict and calculate F1 Score
-    predictions = model.predict(np.expand_dims(test_features, axis=-1))
-    predictions = np.argmax(predictions, axis=1)
+    predictions = model.predict(test_features)
+    predictions = (predictions > 0.5).astype(int).flatten()
     f1 = f1_score(test_labels_encoded, predictions, average='weighted')
     print(f"F1 Score: {f1:.2f}")
+    save_results_to_csv(train_dir, len(history.history['loss']), test_accuracy, test_loss, f1, test_auc)
+
+def save_results_to_csv(base_dir, iterations, test_accuracy, test_loss, f1, test_auc):
+    data = {
+        'Base Directory': base_dir,
+        'Iterations Before Convergence': iterations,
+        'Test Accuracy': test_accuracy,
+        'Test Loss': test_loss,
+        'F1 Score': f1,
+        'AUC': test_auc
+    }
+    df = pd.DataFrame([data])
+    with open('results.csv', 'a', newline='') as file:
+        df.to_csv(file, index=False, header=file.tell()==0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train and evaluate a DNN-HMM hybrid model on urban sound data.')
