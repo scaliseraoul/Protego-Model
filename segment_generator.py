@@ -25,6 +25,7 @@ def ensure_class_folders(output_dir, classes):
 def extract_audio(data, output_dir, classes,min_length,change_ambiguous_to):
     ensure_class_folders(output_dir, classes)
 
+    min_length = min_length/1000
     for item in data:
         video_path = item['data']['video_url'].split('?d=')[1]  # Extracting the file path
         video_path = os.path.join('/Users/raoul/', video_path)  # Adjust base path as necessary
@@ -84,7 +85,7 @@ def save_segment(video_path, video_id, start_time, end_time, label, output_dir):
     command = [
         'ffmpeg', '-i', video_path,
         '-ss', str(start_time), '-to', str(end_time),
-        '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2', output_path
+        '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', output_path
     ]
 
     result = subprocess.run(command, capture_output=True, text=True)

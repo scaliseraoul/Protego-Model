@@ -4,6 +4,7 @@ import numpy as np
 import tensorflow as tf
 import argparse
 from tensorflow.keras import layers
+import tensorflow_hub as hub
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from sklearn.preprocessing import LabelEncoder
@@ -12,20 +13,36 @@ from sklearn.metrics import f1_score
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def extract_features(directory,n_mfcc=13, n_fft=2048, hop_length=512):
-    features, labels = [], []
-    for folder in os.listdir(directory):
-        class_label = folder
-        folder_path = os.path.join(directory, folder)
-        for file in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, file)
-            audio, sample_rate = librosa.load(file_path, sr=None)
-            mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=n_mfcc, n_fft=n_fft, hop_length=hop_length)
-            features.append(mfccs.T)
-            labels.append(class_label)
-    return np.array(features), np.array(labels)
+def load_wav_16k_mono(filename):
+    """Load a WAV file, convert it to a float tensor, audio is already 16 kHz"""
+    # Load the audio file with librosa
+    file_contents = tf.io.read_file(filename)
+    wav, sample_rate = tf.audio.decode_wav(
+        file_contents,
+        desired_channels=1)
+    wav = tf.squeeze(wav, axis=-1)
+    return wav
+
+def extract_features(directory):
+  features, labels = [], []
+  yamnet_model_handle = 'https://tfhub.dev/google/yamnet/1'
+  yamnet_model = hub.load(yamnet_model_handle)
+
+  for folder in os.listdir(directory):
+    class_label = folder
+    folder_path = os.path.join(directory, folder)
+    for file in os.listdir(folder_path):
+      file_path = os.path.join(folder_path, file)
+      # Load and pre-process audio (ensure it matches YAMNet requirements)
+      testing_wav_data = load_wav_16k_mono(file_path)
+      # Add batch dimension
+      scores, embeddings, spectrogram = yamnet_model(testing_wav_data)
+      features.append(embeddings.numpy())  # Extract embedding from 1st dim
+      labels.append(class_label)
+  return np.array(features), np.array(labels)
 
 def build_dnn_model(input_shape):
+    print(input_shape)
     model = Sequential([
         tf.keras.Input(shape=input_shape),
         layers.LSTM(128,return_sequences=True),
@@ -41,7 +58,6 @@ def main(train_dir, test_dir):
     # Load data
     data_features, data_labels = extract_features(train_dir)
     test_features, test_labels = extract_features(test_dir)
-
     
     # Encode labels
     le = LabelEncoder()
@@ -52,10 +68,11 @@ def main(train_dir, test_dir):
     train_features, val_features, train_labels, val_labels = train_test_split(
         data_features, data_labels_encoded, test_size=0.2, random_state=42)
     # Build the DNN model
-    model = build_dnn_model((train_features.shape[1], train_features.shape[2]))
+
+    model = build_dnn_model((None, train_features.shape[2]))
 
     # Setup callbacks
-    checkpoint = ModelCheckpoint(f'keras/{train_dir}-3dshape.keras', save_best_only=True, monitor='val_loss', mode='min')
+    checkpoint = ModelCheckpoint(f'keras/{train_dir}-yammnet.keras', save_best_only=True, monitor='val_loss', mode='min')
     early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min')
 
     # Add class weight
@@ -82,7 +99,7 @@ def main(train_dir, test_dir):
     plt.xlabel('Epoch')
     plt.legend(['Train', 'Val'], loc='upper left')
     plt.tight_layout()
-    plt.savefig(f'images/{train_dir}_plot.png')
+    plt.savefig(f'images/{train_dir}_yammnet_plot.png')
     plt.close()
 
 

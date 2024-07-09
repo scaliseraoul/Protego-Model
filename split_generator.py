@@ -54,15 +54,14 @@ if __name__ == "__main__":
     overlap_percentage = args.overlap_percentage
     change_ambiguous_to = args.change_ambiguous_to
 
-    segment_length_ms = segment_length * 1000
-    overlap_ms = (overlap_percentage/100)*segment_length_ms
+    overlap_ms = (overlap_percentage/100)*segment_length
 
     root_dir = f'test-{change_ambiguous_to}-{segment_length}'
     output_root_dir = f'test-{change_ambiguous_to}-{segment_length}-trimmed-{overlap_percentage}'
     if os.path.exists(output_root_dir):
         shutil.rmtree(output_root_dir)
         print(f"Removed existing directory: {output_root_dir}")  
-    process_directory(root_dir, output_root_dir,segment_length_ms, overlap_ms)
+    process_directory(root_dir, output_root_dir,segment_length, overlap_ms)
 
     ##
 
@@ -71,4 +70,4 @@ if __name__ == "__main__":
     if os.path.exists(output_root_dir):
         shutil.rmtree(output_root_dir)
         print(f"Removed existing directory: {output_root_dir}")  
-    process_directory(root_dir, output_root_dir,segment_length_ms, overlap_ms)
+    process_directory(root_dir, output_root_dir,segment_length, overlap_ms)
